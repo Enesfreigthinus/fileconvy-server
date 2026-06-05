@@ -9,6 +9,7 @@ import (
 
 func NewRouter() *gin.Engine {
 	router := gin.Default()
+	router.MaxMultipartMemory = 64 << 20
 	if err := router.SetTrustedProxies(nil); err != nil {
 		panic(err)
 	}
@@ -23,6 +24,7 @@ func NewRouter() *gin.Engine {
 	router.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
+	router.POST("/api/pdf/merge", mergePDFs)
 
 	return router
 }
