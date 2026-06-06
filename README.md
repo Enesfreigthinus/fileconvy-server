@@ -1,6 +1,6 @@
 # Fileconvy Server
 
-Fileconvy Server is the backend API for Fileconvy. It currently provides a small HTTP service for checking server health and merging PDF files.
+Fileconvy Server is the backend API for Fileconvy. It currently provides a small HTTP service for checking server health, merging PDF files, and extracting selected pages from a PDF.
 
 ## Scope
 
@@ -10,8 +10,9 @@ Current API features:
 
 - `GET /ping` returns a basic health response.
 - `POST /api/pdf/merge` accepts multiple PDF uploads and returns a merged PDF file.
+- `POST /api/pdf/split` accepts one PDF upload and returns a new PDF containing only selected pages.
 
-The PDF merge endpoint validates that uploaded files have a `.pdf` extension and start with a PDF file header before merging them.
+PDF endpoints validate that uploaded files have a `.pdf` extension and start with a PDF file header before processing them.
 
 ## Requirements
 
@@ -24,7 +25,7 @@ Main Go dependencies:
 
 - `github.com/gin-gonic/gin` for the HTTP server
 - `github.com/gin-contrib/cors` for CORS handling
-- `github.com/pdfcpu/pdfcpu` for PDF merging
+- `github.com/pdfcpu/pdfcpu` for PDF processing
 
 ## Setup
 
@@ -81,6 +82,17 @@ curl -X POST http://localhost:8080/api/pdf/merge \
 ```
 
 The merge endpoint requires at least two PDF files. The response is an `application/pdf` download named `merged.pdf`.
+
+Split a PDF by selected pages:
+
+```bash
+curl -X POST http://localhost:8080/api/pdf/split \
+  -F "file=@input.pdf" \
+  -F "pages=1,3,5" \
+  --output split.pdf
+```
+
+The split endpoint also accepts ranges such as `2-5`. The response is an `application/pdf` download named `split.pdf`.
 
 ## Frontend Access
 
@@ -163,6 +175,35 @@ Common error responses:
 - `400 Bad Request` when fewer than two PDF files are uploaded
 - `400 Bad Request` when an uploaded file is not a PDF
 - `500 Internal Server Error` when temporary storage or PDF merging fails
+
+### `POST /api/pdf/split`
+
+Creates a new PDF containing only the selected pages from one uploaded PDF.
+
+Request type:
+
+```text
+multipart/form-data
+```
+
+Required fields:
+
+- `file`: one PDF file
+- `pages`: a page selection expression, such as `1,3,5` or `2-5`
+
+Success response:
+
+- Status: `200 OK`
+- Content-Type: `application/pdf`
+- Content-Disposition: `attachment; filename="split.pdf"`
+
+Common error responses:
+
+- `400 Bad Request` when the `file` field is missing
+- `400 Bad Request` when the `pages` field is missing or invalid
+- `400 Bad Request` when the selected pages do not exist in the uploaded PDF
+- `400 Bad Request` when the uploaded file is not a PDF
+- `500 Internal Server Error` when temporary storage or PDF splitting fails
 
 ## Operational Notes
 

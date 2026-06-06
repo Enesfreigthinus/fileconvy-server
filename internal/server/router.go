@@ -25,6 +25,7 @@ func NewRouter() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
 	router.POST("/api/pdf/merge", mergePDFs)
+	router.POST("/api/pdf/split", splitPDF)
 
 	return router
 }
