@@ -2,10 +2,16 @@ package server
 
 import (
 	"bytes"
+	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -136,12 +142,89 @@ func TestCompressPDFMissingFile(t *testing.T) {
 	}
 }
 
+func TestConvertImageToPDF(t *testing.T) {
+	body, contentType := multipartBody(t, "file", "input.png", createTestPNG(t))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pdf/convert", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	NewRouter().ServeHTTP(rec, req)
+
+	assertPDFResponse(t, rec, `attachment; filename="converted.pdf"`)
+}
+
+func TestConvertOfficeDocumentToPDF(t *testing.T) {
+	originalRunLibreOfficeConvert := runLibreOfficeConvert
+	t.Cleanup(func() {
+		runLibreOfficeConvert = originalRunLibreOfficeConvert
+	})
+
+	runLibreOfficeConvert = func(ctx context.Context, inputPath, outputDir string) ([]byte, error) {
+		if filepath.Base(inputPath) != "input.docx" {
+			t.Fatalf("libreoffice input = %q, want input.docx", inputPath)
+		}
+		if filepath.Dir(inputPath) != outputDir {
+			t.Fatalf("libreoffice output dir = %q, want %q", outputDir, filepath.Dir(inputPath))
+		}
+
+		outputPath := strings.TrimSuffix(inputPath, filepath.Ext(inputPath)) + ".pdf"
+		if err := os.WriteFile(outputPath, createTestPDF(t), 0600); err != nil {
+			t.Fatalf("failed to write fake libreoffice output: %v", err)
+		}
+
+		return []byte("convert ok"), nil
+	}
+
+	body, contentType := multipartBody(t, "file", "report.docx", []byte("docx content"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pdf/convert", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	NewRouter().ServeHTTP(rec, req)
+
+	assertPDFResponse(t, rec, `attachment; filename="converted.pdf"`)
+}
+
+func TestConvertUnsupportedFile(t *testing.T) {
+	body, contentType := multipartBody(t, "file", "notes.txt", []byte("plain text"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pdf/convert", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	NewRouter().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/pdf/convert status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
 func createTestPDF(t *testing.T) []byte {
 	t.Helper()
 
 	var buf bytes.Buffer
 	if err := api.Create(nil, strings.NewReader(testPDFJSON), &buf, nil); err != nil {
 		t.Fatalf("failed to create test PDF: %v", err)
+	}
+
+	return buf.Bytes()
+}
+
+func createTestPNG(t *testing.T) []byte {
+	t.Helper()
+
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			img.Set(x, y, color.RGBA{R: 20, G: 120, B: 210, A: 255})
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to create test PNG: %v", err)
 	}
 
 	return buf.Bytes()
@@ -164,4 +247,24 @@ func multipartBody(t *testing.T, fieldName, fileName string, content []byte) (io
 	}
 
 	return body, writer.FormDataContentType()
+}
+
+func assertPDFResponse(t *testing.T, rec *httptest.ResponseRecorder, contentDisposition string) {
+	t.Helper()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("response status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/pdf" {
+		t.Fatalf("Content-Type = %q, want application/pdf", got)
+	}
+	if got := rec.Header().Get("Content-Disposition"); got != contentDisposition {
+		t.Fatalf("Content-Disposition = %q, want %q", got, contentDisposition)
+	}
+	if !bytes.HasPrefix(rec.Body.Bytes(), []byte("%PDF-")) {
+		t.Fatalf("response body does not look like a PDF")
+	}
+	if err := api.Validate(bytes.NewReader(rec.Body.Bytes()), nil); err != nil {
+		t.Fatalf("PDF response failed validation: %v", err)
+	}
 }
