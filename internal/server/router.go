@@ -26,6 +26,7 @@ func NewRouter() *gin.Engine {
 	})
 	router.POST("/api/pdf/merge", mergePDFs)
 	router.POST("/api/pdf/split", splitPDF)
+	router.POST("/api/pdf/compress", compressPDF)
 
 	return router
 }

@@ -18,6 +18,7 @@ import (
 
 const mergedPDFName = "merged.pdf"
 const splitPDFName = "split.pdf"
+const compressedPDFName = "compressed.pdf"
 
 func mergePDFs(c *gin.Context) {
 	form, err := c.MultipartForm()
@@ -55,9 +56,7 @@ func mergePDFs(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Type", "application/pdf")
-	c.Header("Content-Disposition", `attachment; filename="`+mergedPDFName+`"`)
-	c.File(outputPath)
+	sendPDFFile(c, outputPath, mergedPDFName)
 }
 
 func splitPDF(c *gin.Context) {
@@ -98,9 +97,36 @@ func splitPDF(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Type", "application/pdf")
-	c.Header("Content-Disposition", `attachment; filename="`+splitPDFName+`"`)
-	c.File(outputPath)
+	sendPDFFile(c, outputPath, splitPDFName)
+}
+
+func compressPDF(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expected multipart form-data with a PDF file field named file"})
+		return
+	}
+
+	tempDir, err := os.MkdirTemp("", "fileconvy-pdf-compress-*")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare temporary storage"})
+		return
+	}
+	defer os.RemoveAll(tempDir)
+
+	inputPath := filepath.Join(tempDir, "input.pdf")
+	if err := savePDFUpload(file, inputPath); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	outputPath := filepath.Join(tempDir, compressedPDFName)
+	if err := api.OptimizeFile(inputPath, outputPath, nil); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compress PDF file"})
+		return
+	}
+
+	sendPDFFile(c, outputPath, compressedPDFName)
 }
 
 func uploadedFiles(form *multipart.Form) []*multipart.FileHeader {
@@ -146,6 +172,12 @@ func withoutWhitespace(s string) string {
 	}
 
 	return b.String()
+}
+
+func sendPDFFile(c *gin.Context, filePath, fileName string) {
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Disposition", `attachment; filename="`+fileName+`"`)
+	c.File(filePath)
 }
 
 func savePDFUpload(fileHeader *multipart.FileHeader, destination string) error {
